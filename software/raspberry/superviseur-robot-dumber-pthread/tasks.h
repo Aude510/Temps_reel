@@ -83,6 +83,7 @@ private:
     RT_TASK th_startRobot;
     RT_TASK th_move;
     RT_TASK th_camera;
+    RT_TASK th_battery;
 
     RT_MUTEX mutex_robotStarted;
     RT_MUTEX mutex_move;

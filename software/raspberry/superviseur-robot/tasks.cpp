@@ -46,6 +46,10 @@
  * 7- Good luck !
  */
 
+Tasks::Tasks() 
+    :camera(sm, 5)
+{}
+
 /**
  * @brief Initialisation des structures de l'application (tâches, mutex, 
  * semaphore, etc.)
@@ -61,18 +65,27 @@ void Tasks::Init() {
         cerr << "Error mutex create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
+
     if (err = rt_mutex_create(&mutex_robot, NULL)) {
         cerr << "Error mutex create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
+
     if (err = rt_mutex_create(&mutex_robotStarted, NULL)) {
         cerr << "Error mutex create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
+
     if (err = rt_mutex_create(&mutex_move, NULL)) {
         cerr << "Error mutex create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
+
+    if (err = rt_mutex_create(&mutex_cameraOpen, NULL)) {
+        cerr << "Error mutex create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+
     cout << "Mutexes created successfully" << endl << flush;
 
     /**************************************************************************************/
@@ -82,15 +95,29 @@ void Tasks::Init() {
         cerr << "Error semaphore create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
+
     if (err = rt_sem_create(&sem_openComRobot, NULL, 0, S_FIFO)) {
         cerr << "Error semaphore create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
+
     if (err = rt_sem_create(&sem_serverOk, NULL, 0, S_FIFO)) {
         cerr << "Error semaphore create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
+
     if (err = rt_sem_create(&sem_startRobot, NULL, 0, S_FIFO)) {
+        cerr << "Error semaphore create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+
+    if (err = rt_sem_create(&sem_camera, NULL, 0, S_FIFO)) {
+        cerr << "Error semaphore create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+    
+    
+    if (err = rt_sem_create(&sem_battery, NULL, 0, S_FIFO)) {
         cerr << "Error semaphore create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
@@ -103,26 +130,42 @@ void Tasks::Init() {
         cerr << "Error task create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
+
     if (err = rt_task_create(&th_sendToMon, "th_sendToMon", 0, PRIORITY_TSENDTOMON, 0)) {
         cerr << "Error task create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
+
     if (err = rt_task_create(&th_receiveFromMon, "th_receiveFromMon", 0, PRIORITY_TRECEIVEFROMMON, 0)) {
         cerr << "Error task create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
+
     if (err = rt_task_create(&th_openComRobot, "th_openComRobot", 0, PRIORITY_TOPENCOMROBOT, 0)) {
         cerr << "Error task create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
+
     if (err = rt_task_create(&th_startRobot, "th_startRobot", 0, PRIORITY_TSTARTROBOT, 0)) {
         cerr << "Error task create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
+
     if (err = rt_task_create(&th_move, "th_move", 0, PRIORITY_TMOVE, 0)) {
         cerr << "Error task create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
+
+    if (err = rt_task_create(&th_batteryLevel, "th_battery", 0, PRIORITY_TSENDTOMON, 0)) {
+        cerr << "Error task create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+
+    if (err = rt_task_create(&th_startCamera, "th_startCamera", 0, PRIORITY_TCAMERA, 0)) {
+        cerr << "Error task create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+
     cout << "Tasks created successfully" << endl << flush;
 
     /**************************************************************************************/
@@ -168,12 +211,17 @@ void Tasks::Run() {
         exit(EXIT_FAILURE);
     }
 
-    if (err = rt_task_start(&th_move, (void(*)(void*)) & Tasks::MoveTask, this)) {
+    if (err = rt_task_start(&th_move, (void(*)(void*))&Tasks::MoveTask, this)) {
         cerr << "Error task start: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
 
-    if (err = rt_task_start(&th_move, (void(*)(void*)) & Tasks::SendBatLevel, this)) {
+    if (err = rt_task_start(&th_batteryLevel, (void(*)(void*))&Tasks::SendBatLevel, this)) {
+        cerr << "Error task start: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+
+    if (err = rt_task_start(&th_startCamera, (void(*)(void*))&Tasks::StartCameraTask, this)) {
         cerr << "Error task start: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
@@ -286,7 +334,14 @@ void Tasks::ReceiveFromMonTask(void *arg) {
             rt_mutex_acquire(&mutex_move, TM_INFINITE);
             move = msgRcv->GetID();
             rt_mutex_release(&mutex_move);
+      
+        } else if (msgRcv->CompareID(MESSAGE_ROBOT_BATTERY_GET)) {
+            rt_sem_v(&sem_battery);
+
+        } else if (msgRcv->CompareID(MESSAGE_CAM_OPEN)) {
+            rt_sem_v(&sem_camera);
         }
+
         delete(msgRcv); // mus be deleted manually, no consumer
     }
 }
@@ -395,23 +450,6 @@ void Tasks::MoveTask(void *arg) {
 }
 
 /**
- * @brief Thread handling control of the battery level.
- */
-void Tasks::SendBatLevel(void *arg) 
-{
-    rt_task_set_periodic(NULL, TM_NOW, 500000000); // en ns?
-    Message* msg = new Message(DMB_GET_VBAT);
-
-    while(1)
-    {
-        rt_task_wait_period(NULL);
-        // chauve souris (Alata) 
-        Message* lvlBat = ComRobot::Write(msg);
-        ComMonitor::Write(lvlBat);
-    }
-}
-
-/**
  * Write a message in a given queue
  * @param queue Queue identifier
  * @param msg Message to be stored
@@ -443,3 +481,56 @@ Message *Tasks::ReadInQueue(RT_QUEUE *queue) {
     return msg;
 }
 
+/**
+ * @brief Thread handling control of the battery level.
+ */
+void Tasks::SendBatLevel(void *arg) 
+{
+    cout << "Start " << __PRETTY_FUNCTION__ << endl << flush;
+    // Synchronization barrier (waiting that all tasks are starting)
+    rt_sem_p(&sem_barrier, TM_INFINITE);
+
+
+    rt_task_set_periodic(NULL, TM_NOW, 500000000); // en ns?
+
+    rt_sem_p(&sem_battery, TM_INFINITE);
+
+
+    while(1)
+    {
+        rt_task_wait_period(NULL);
+        cout << "send battery" << endl;
+        // // chauve souris (Alata) 
+        rt_mutex_acquire(&mutex_robot, TM_INFINITE);
+        MessageBattery* lvlBat = (MessageBattery*)robot.Write(new Message(MESSAGE_ROBOT_BATTERY_GET));
+        cout << lvlBat->GetLevel() << endl;
+        rt_mutex_release(&mutex_robot);    
+        WriteInQueue(&q_messageToMon, lvlBat);
+    }
+}
+
+//camera task
+
+void Tasks::StartCameraTask(void *arg)
+{
+    cout << "Start " << __PRETTY_FUNCTION__ << endl << flush;
+    // Synchronization barrier (waiting that all tasks are starting)
+    rt_sem_p(&sem_barrier, TM_INFINITE);
+    
+    /**************************************************************************************/
+    /* The task startCamera starts here                                                    */
+    /**************************************************************************************/
+    while (1) {
+
+        rt_sem_p(&sem_camera, TM_INFINITE);
+        cout << "Opening Camera :-) " << endl; 
+        rt_mutex_acquire(&mutex_cameraOpen, TM_INFINITE);
+        if (!camera.Open()) // problem opening camera 
+        {
+            WriteInQueue(&q_messageToMon, new Message(MESSAGE_ANSWER_NACK)); //:)
+        } 
+        rt_mutex_release(&mutex_cameraOpen);
+        cout << ")" << endl;
+
+    }
+}

@@ -38,6 +38,8 @@ using namespace std;
 
 class Tasks {
 public:
+    Tasks();
+
     /**
      * @brief Initializes main structures (semaphores, tasks, mutex, etc.)
      */
@@ -64,6 +66,7 @@ private:
     /**********************************************************************/
     ComMonitor monitor;
     ComRobot robot;
+    Camera camera; // sm = small 
     int robotStarted = 0;
     int move = MESSAGE_ROBOT_STOP;
     
@@ -77,6 +80,7 @@ private:
     RT_TASK th_startRobot;
     RT_TASK th_move;
     RT_TASK th_batteryLevel;
+    RT_TASK th_startCamera;
 
     /**********************************************************************/
     /* Mutex                                                              */
@@ -85,6 +89,7 @@ private:
     RT_MUTEX mutex_robot;
     RT_MUTEX mutex_robotStarted;
     RT_MUTEX mutex_move;
+    RT_MUTEX mutex_cameraOpen; 
 
     /**********************************************************************/
     /* Semaphores                                                         */
@@ -93,6 +98,8 @@ private:
     RT_SEM sem_openComRobot;
     RT_SEM sem_serverOk;
     RT_SEM sem_startRobot;
+    RT_SEM sem_battery; 
+    RT_SEM sem_camera; 
 
     /**********************************************************************/
     /* Message queues                                                     */
@@ -134,6 +141,7 @@ private:
     void MoveTask(void *arg);
     
     void SendBatLevel(void *arg);
+    void StartCameraTask(void *arg);
     /**********************************************************************/
     /* Queue services                                                     */
     /**********************************************************************/
