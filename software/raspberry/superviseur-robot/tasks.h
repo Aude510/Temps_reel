@@ -67,9 +67,12 @@ private:
     ComMonitor monitor;
     ComRobot robot;
     Camera camera; // sm = small 
+
     int robotStarted = 0;
     int move = MESSAGE_ROBOT_STOP;
     
+    Arena* arena;
+
     /**********************************************************************/
     /* Tasks                                                              */
     /**********************************************************************/
@@ -81,6 +84,9 @@ private:
     RT_TASK th_move;
     RT_TASK th_batteryLevel;
     RT_TASK th_startCamera;
+    RT_TASK th_cameraImages; 
+    RT_TASK th_cameraClose; 
+    RT_TASK th_askArena;
 
     /**********************************************************************/
     /* Mutex                                                              */
@@ -99,7 +105,10 @@ private:
     RT_SEM sem_serverOk;
     RT_SEM sem_startRobot;
     RT_SEM sem_battery; 
-    RT_SEM sem_camera; 
+    RT_SEM sem_camera;
+    RT_SEM sem_camera_images;  
+    RT_SEM sem_camera_close; 
+    RT_SEM sem_camera_ask_arena;
 
     /**********************************************************************/
     /* Message queues                                                     */
@@ -140,8 +149,17 @@ private:
      */
     void MoveTask(void *arg);
     
+    // ------------------------------------------------------------------
+
+    void CreateMutex(RT_MUTEX* mutex);
+    void CreateSemaphore(RT_SEM* semaphore);
+    void CreateTask(RT_TASK* task, int priority, const char* taskName);
+    void StartTask(RT_TASK* task, void* callback);
     void SendBatLevel(void *arg);
     void StartCameraTask(void *arg);
+    void SendImagesTask(void * arg); 
+    void CloseCameraTask(void * arg); 
+    void ConfirmArenaTask(void * arg);
     /**********************************************************************/
     /* Queue services                                                     */
     /**********************************************************************/
