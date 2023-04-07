@@ -69,9 +69,12 @@ private:
     Camera camera; // sm = small 
 
     int robotStarted = 0;
+    int nbErrorCom = 0;
     int move = MESSAGE_ROBOT_STOP;
-    
-    Arena* arena;
+    bool drawArena = false;
+    bool drawPosition = false; 
+
+    Arena arena;
 
     /**********************************************************************/
     /* Tasks                                                              */
@@ -96,6 +99,9 @@ private:
     RT_MUTEX mutex_robotStarted;
     RT_MUTEX mutex_move;
     RT_MUTEX mutex_cameraOpen; 
+    RT_MUTEX mutex_drawArena;
+    RT_MUTEX mutex_drawPosition; 
+    RT_MUTEX mutex_conterErrorCom;
 
     /**********************************************************************/
     /* Semaphores                                                         */

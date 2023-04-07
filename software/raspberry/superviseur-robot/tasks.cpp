@@ -46,9 +46,7 @@
  * 7- Good luck !
  */
 
-Tasks::Tasks() 
-    : camera(sm, 5), arena(NULL)
-{}
+Tasks::Tasks() : camera(sm, 5) {}
 
 /**
  * @brief Initialisation des structures de l'application (tâches, mutex, 
@@ -60,6 +58,9 @@ void Tasks::Init() {
     CreateMutex(&mutex_robotStarted);
     CreateMutex(&mutex_move);
     CreateMutex(&mutex_cameraOpen);
+    CreateMutex(&mutex_drawArena);
+    CreateMutex(&mutex_drawPosition); 
+    CreateMutex(&mutex_conterErrorCom);
 
     cout << "Mutexes created successfully" << endl << flush;
 
@@ -213,36 +214,77 @@ void Tasks::ReceiveFromMonTask(void *arg) {
         msgRcv = monitor.Read();
         cout << "Rcv <= " << msgRcv->ToString() << endl << flush;
 
-        if (msgRcv->CompareID(MESSAGE_MONITOR_LOST)) {
+        if (msgRcv->CompareID(MESSAGE_MONITOR_LOST)) 
+        {
             delete(msgRcv);
             exit(-1);
-        } else if (msgRcv->CompareID(MESSAGE_ROBOT_COM_OPEN)) {
+        } 
+        else if (msgRcv->CompareID(MESSAGE_ROBOT_COM_OPEN)) 
+        {
             rt_sem_v(&sem_openComRobot);
-        } else if (msgRcv->CompareID(MESSAGE_ROBOT_START_WITHOUT_WD)) {
+        } 
+        else if (msgRcv->CompareID(MESSAGE_ROBOT_START_WITHOUT_WD)) 
+        {
             rt_sem_v(&sem_startRobot);
-        } else if (msgRcv->CompareID(MESSAGE_ROBOT_GO_FORWARD) ||
-                msgRcv->CompareID(MESSAGE_ROBOT_GO_BACKWARD) ||
-                msgRcv->CompareID(MESSAGE_ROBOT_GO_LEFT) ||
-                msgRcv->CompareID(MESSAGE_ROBOT_GO_RIGHT) ||
-                msgRcv->CompareID(MESSAGE_ROBOT_STOP)) {
-
+        } 
+        else if (msgRcv->CompareID(MESSAGE_ROBOT_GO_FORWARD) || msgRcv->CompareID(MESSAGE_ROBOT_GO_BACKWARD) || msgRcv->CompareID(MESSAGE_ROBOT_GO_LEFT) || msgRcv->CompareID(MESSAGE_ROBOT_GO_RIGHT) || msgRcv->CompareID(MESSAGE_ROBOT_STOP)) 
+        {
             rt_mutex_acquire(&mutex_move, TM_INFINITE);
             move = msgRcv->GetID();
             rt_mutex_release(&mutex_move);
       
-        } else if (msgRcv->CompareID(MESSAGE_ROBOT_BATTERY_GET)) {
+        } 
+        else if (msgRcv->CompareID(MESSAGE_ROBOT_BATTERY_GET)) 
+        {
             rt_sem_v(&sem_battery);
 
-        } else if (msgRcv->CompareID(MESSAGE_CAM_OPEN)) {
+        } 
+        else if (msgRcv->CompareID(MESSAGE_CAM_OPEN)) 
+        {
             rt_sem_v(&sem_camera);
 
-        } else if (msgRcv->CompareID(MESSAGE_CAM_CLOSE)) {
+        } 
+        else if (msgRcv->CompareID(MESSAGE_CAM_CLOSE)) 
+        {
             rt_sem_v(&sem_camera_close); 
-        } else if (msgRcv->CompareID(MESSAGE_CAM_ASK_ARENA)) {
+        } 
+        else if (msgRcv->CompareID(MESSAGE_CAM_ASK_ARENA))
+        {
             rt_sem_v(&sem_camera_ask_arena); 
         }  
-
-
+        else if (msgRcv->CompareID(MESSAGE_CAM_ARENA_CONFIRM)) 
+        {
+            rt_mutex_acquire(&mutex_drawArena, TM_INFINITE);
+            rt_mutex_acquire(&mutex_cameraOpen, TM_INFINITE);
+            drawArena = true;
+            camera.Open();
+            rt_mutex_release(&mutex_cameraOpen);
+            rt_mutex_release(&mutex_drawArena);
+            rt_sem_v(&sem_camera_images);
+        } 
+        else if (msgRcv->CompareID(MESSAGE_CAM_ARENA_INFIRM)) 
+        {
+            rt_mutex_acquire(&mutex_drawArena, TM_INFINITE);
+            rt_mutex_acquire(&mutex_cameraOpen, TM_INFINITE);
+            drawArena = false;
+            camera.Open();
+            rt_mutex_release(&mutex_cameraOpen);
+            rt_mutex_release(&mutex_drawArena);
+            rt_sem_v(&sem_camera_images);
+        }
+        else if (msgRcv->CompareID(MESSAGE_CAM_POSITION_COMPUTE_START))
+        {
+            rt_mutex_acquire(&mutex_drawPosition, TM_INFINITE); 
+            drawPosition = true; 
+            rt_mutex_release(&mutex_drawPosition); 
+        }
+        
+        else if (msgRcv->CompareID(MESSAGE_CAM_POSITION_COMPUTE_STOP))
+        {
+            rt_mutex_acquire(&mutex_drawPosition, TM_INFINITE); 
+            drawPosition = false; 
+            rt_mutex_release(&mutex_drawPosition); 
+        }
         delete(msgRcv); // mus be deleted manually, no consumer
     }
 }
@@ -270,10 +312,13 @@ void Tasks::OpenComRobot(void *arg) {
         cout << status;
         cout << ")" << endl << flush;
 
-        Message * msgSend;
-        if (status < 0) {
+        Message* msgSend;
+        if (status < 0) 
+        {
             msgSend = new Message(MESSAGE_ANSWER_NACK);
-        } else {
+        } 
+        else 
+        {
             msgSend = new Message(MESSAGE_ANSWER_ACK);
         }
         WriteInQueue(&q_messageToMon, msgSend); // msgSend will be deleted by sendToMon
@@ -291,25 +336,42 @@ void Tasks::StartRobotTask(void *arg) {
     /**************************************************************************************/
     /* The task startRobot starts here                                                    */
     /**************************************************************************************/
-    while (1) {
-
+    while (true) 
+    {
         Message * msgSend;
         rt_sem_p(&sem_startRobot, TM_INFINITE);
         cout << "Start robot without watchdog (";
         rt_mutex_acquire(&mutex_robot, TM_INFINITE);
         msgSend = robot.Write(robot.StartWithoutWD());
         rt_mutex_release(&mutex_robot);
-        cout << msgSend->GetID();
-        cout << ")" << endl;
-
-        cout << "Movement answer: " << msgSend->ToString() << endl << flush;
-        WriteInQueue(&q_messageToMon, msgSend);  // msgSend will be deleted by sendToMon
-
-        if (msgSend->GetID() == MESSAGE_ANSWER_ACK) {
-            rt_mutex_acquire(&mutex_robotStarted, TM_INFINITE);
-            robotStarted = 1;
-            rt_mutex_release(&mutex_robotStarted);
+        rt_mutex_acquire(&mutex_conterErrorCom, TM_INFINITE);
+        if (msgSend->GetID() == MESSAGE_ANSWER_COM_ERROR)
+        {
+            nbErrorCom++;
+            if (nbErrorCom>=3)
+            {
+                WriteInQueue(&q_messageToMon, new Message(MESSAGE_ANSWER_COM_ERROR));
+                robot.Close();
+                rt_sem_v(&sem_openComRobot);
+            }
         }
+        else 
+        {
+            nbErrorCom=0;
+            rt_mutex_release(&mutex_conterErrorCom);
+            cout << msgSend->GetID();
+            cout << ")" << endl;
+
+            cout << "Movement answer: " << msgSend->ToString() << endl << flush;
+            WriteInQueue(&q_messageToMon, msgSend);  // msgSend will be deleted by sendToMon
+
+            if (msgSend->GetID() == MESSAGE_ANSWER_ACK) {
+                rt_mutex_acquire(&mutex_robotStarted, TM_INFINITE);
+                robotStarted = 1;
+                rt_mutex_release(&mutex_robotStarted);
+            }
+        }
+        
     }
 }
 
@@ -329,7 +391,8 @@ void Tasks::MoveTask(void *arg) {
     /**************************************************************************************/
     rt_task_set_periodic(NULL, TM_NOW, 100000000); // en ns?
 
-    while (1) {
+    while (true) 
+    {
         rt_task_wait_period(NULL);
         cout << "Periodic movement update";
         rt_mutex_acquire(&mutex_robotStarted, TM_INFINITE);
@@ -343,8 +406,25 @@ void Tasks::MoveTask(void *arg) {
             cout << " move: " << cpMove;
             
             rt_mutex_acquire(&mutex_robot, TM_INFINITE);
-            robot.Write(new Message((MessageID)cpMove));
-            rt_mutex_release(&mutex_robot);
+            Message * msgSend = robot.Write(new Message((MessageID)cpMove));
+            rt_mutex_acquire(&mutex_conterErrorCom, TM_INFINITE);
+            if (msgSend->GetID() == MESSAGE_ANSWER_COM_ERROR)
+            {
+                nbErrorCom++;
+                rt_mutex_release(&mutex_conterErrorCom);
+                if (nbErrorCom>=3)
+                {
+                    WriteInQueue(&q_messageToMon, new Message(MESSAGE_ANSWER_COM_ERROR));
+                    robot.Close();
+                    rt_sem_v(&sem_openComRobot);
+                }
+            }
+            else 
+            {
+                nbErrorCom=0;
+                rt_mutex_release(&mutex_conterErrorCom);
+                rt_mutex_release(&mutex_robot);
+            }
         }
         cout << endl << flush;
     }
@@ -372,12 +452,11 @@ Message *Tasks::ReadInQueue(RT_QUEUE *queue) {
     int err;
     Message *msg;
 
-    if ((err = rt_queue_read(queue, &msg, sizeof ((void*) &msg), TM_INFINITE)) < 0) {
+    if ((err = rt_queue_read(queue, &msg, sizeof ((void*) &msg), TM_INFINITE)) < 0)
+    {
         cout << "Read in queue failed: " << strerror(-err) << endl << flush;
         throw std::runtime_error{"Error in read in queue"};
-    }/** else {
-        cout << "@msg :" << msg << endl << flush;
-    } /**/
+    }
 
     return msg;
 }
@@ -445,9 +524,25 @@ void Tasks::SendBatLevel(void *arg)
         cout << "send battery" << endl << flush;
         rt_mutex_acquire(&mutex_robot, TM_INFINITE);
         MessageBattery* lvlBat = (MessageBattery*)robot.Write(new Message(MESSAGE_ROBOT_BATTERY_GET));
-        cout << lvlBat->GetLevel() << endl;
-        rt_mutex_release(&mutex_robot);    
-        WriteInQueue(&q_messageToMon, lvlBat);
+        rt_mutex_acquire(&mutex_conterErrorCom, TM_INFINITE);
+        if (lvlBat->GetID() == MESSAGE_ANSWER_COM_ERROR){
+            nbErrorCom++;
+            rt_mutex_release(&mutex_conterErrorCom);
+            if (nbErrorCom>=3)
+            {
+                WriteInQueue(&q_messageToMon, new Message(MESSAGE_ANSWER_COM_ERROR));
+                robot.Close();
+                rt_sem_v(&sem_openComRobot);
+            }
+        }
+        else
+        {
+            nbErrorCom=0;
+            rt_mutex_release(&mutex_conterErrorCom);
+            cout << lvlBat->GetLevel() << endl;
+            rt_mutex_release(&mutex_robot);    
+            WriteInQueue(&q_messageToMon, lvlBat);
+        }
     }
 }
 
@@ -492,21 +587,40 @@ void Tasks::SendImagesTask(void *arg)
     rt_sem_p(&sem_barrier, TM_INFINITE);
     
     rt_task_set_periodic(NULL, TM_NOW, 100000000); // en ns?
-    while (1)
-    {
-        rt_sem_p(&sem_camera_images,TM_INFINITE); 
-        rt_mutex_acquire(&mutex_cameraOpen,TM_INFINITE);
-        Img frame = camera.Grab(); // récup image 
-        rt_mutex_release(&mutex_cameraOpen); 
-        WriteInQueue(&q_messageToMon, new MessageImg(MESSAGE_CAM_IMAGE,&frame)); // envoyer image 
-        rt_sem_v(&sem_camera_images); 
 
+    while (true)
+    {
+        rt_sem_p(&sem_camera_images, TM_INFINITE); 
+        rt_mutex_acquire(&mutex_cameraOpen, TM_INFINITE);
+        Img frame = camera.Grab(); // récup image 
+        if (drawArena)
+        {
+            frame.DrawArena(arena); // fonctionnalité 17 
+            if (drawPosition) 
+            { 
+                // fonctionnalité 18
+                std::list<Position> list = frame.SearchRobot(arena); 
+                if (list.empty())
+                {
+                    Position position;
+                    position.center.x = -1;
+                    position.center.y = -1;
+                    WriteInQueue(&q_messageToMon, new MessagePosition(MESSAGE_CAM_POSITION, position)); 
+                }
+                else
+                {
+                    WriteInQueue(&q_messageToMon, new MessagePosition(MESSAGE_CAM_POSITION, list.front())); 
+                    frame.DrawRobot(list.front()); 
+                }
+            } 
+        }
+        rt_mutex_release(&mutex_cameraOpen); 
+        WriteInQueue(&q_messageToMon, new MessageImg(MESSAGE_CAM_IMAGE, &frame)); // envoyer image 
+        rt_sem_v(&sem_camera_images); 
     }
 }
 
 //camera task : fermer la caméra, fonctionnalité 16
-
-
 void Tasks::CloseCameraTask(void * arg)
 {
     cout << "Start " << __PRETTY_FUNCTION__ << endl << flush;
@@ -527,29 +641,33 @@ void Tasks::CloseCameraTask(void * arg)
     }
 }
 
-// fonctionnalité 17 : détection de l'arena fonctionnelle; reste à coder confirmation par le moniteur
-
+// fonctionnalité 17 : 
 void Tasks::ConfirmArenaTask(void * arg)
 {
     cout << "Start " << __PRETTY_FUNCTION__ << endl << flush;
     // Synchronization barrier (waiting that all tasks are starting)
     rt_sem_p(&sem_barrier, TM_INFINITE);
 
-    while(1)
+    while(true)
     {
         rt_sem_p(&sem_camera_ask_arena, TM_INFINITE);
+        
         cout << "Drawing Arena :-) " << endl; 
+        
         rt_sem_p(&sem_camera_images, TM_INFINITE);
-        rt_mutex_acquire(&mutex_cameraOpen,TM_INFINITE);
-        Img frame = camera.Grab(); // récup image 
+        rt_mutex_acquire(&mutex_cameraOpen, TM_INFINITE);
+        
+        Img frame = camera.Grab(); // récup image
+        camera.Close();
+        
         rt_mutex_release(&mutex_cameraOpen);
 
-        Arena testArena = frame.SearchArena();
+        arena = frame.SearchArena();
 
-        if(!testArena.IsEmpty())
+        if(!arena.IsEmpty())
         {
-            cout << testArena.ToString() << endl << flush;
-            frame.DrawArena(testArena);
+            cout << arena.ToString() << endl << flush;
+            frame.DrawArena(arena);
             WriteInQueue(&q_messageToMon, new MessageImg(MESSAGE_CAM_IMAGE, &frame));
         }
         else
@@ -559,3 +677,9 @@ void Tasks::ConfirmArenaTask(void * arg)
         }
     }
 }
+
+/*TODO : Fonctionnalité 5-6
+Tester 8-9
+10-11 Watchdog
+12 : ne pas envoyer stop tout le temps
+*/
