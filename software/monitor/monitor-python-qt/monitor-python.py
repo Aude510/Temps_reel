@@ -28,6 +28,7 @@ class Window(QtWidgets.QMainWindow, Ui_MainWindow):
         super().__init__(parent)
         self.setupUi(self)
         
+
         #self.DisableUIWidgets("Network")
         
         self.lineEdit_address.setText(GlobVar.address)
@@ -88,6 +89,24 @@ class Window(QtWidgets.QMainWindow, Ui_MainWindow):
         self.networkThread.logEvent.connect(self.OnLogEvent)
         self.networkThread.answerEvent.connect(self.OnAnswerEvent)
     
+    def keyPressEvent(self, event) :
+        if event.key() == QtCore.Qt.Key_Z :
+            self.networkThread.robotGoForward()
+        
+        if event.key() == QtCore.Qt.Key_S : 
+            self.networkThread.robotGoBackward()
+        
+        if event.key() == QtCore.Qt.Key_Q :
+            self.networkThread.robotGoLeft()
+        
+        if event.key() == QtCore.Qt.Key_D :
+            self.networkThread.robotGoRight()
+
+
+    def keyReleaseEvent(self, event) :
+        pass
+
+
     def EnableUIWidgets(self, area):
         if area == "Network":
             self.groupBox_activation.setDisabled(False)
