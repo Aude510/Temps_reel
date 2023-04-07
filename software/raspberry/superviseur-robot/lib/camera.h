@@ -48,7 +48,7 @@ public:
      * @param size Size of picture to grab (@see captureSize)
      * @param fps speed of sampling
      */
-    Camera(int size, int fps);
+    Camera(int size, int fps); // size sm, fps 5
 
     /**
      * Open camera
